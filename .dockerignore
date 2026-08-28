@@ -1,0 +1,14 @@
+# git
+.git
+.gitignore
+*.md
+!README.md
+LICENSE
+
+# local state
+.env
+workspace/
+*.log
+
+# ci
+.github

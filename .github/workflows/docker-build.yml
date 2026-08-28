@@ -1,0 +1,140 @@
+# =====================================================================
+# docker-build — keep :latest always current with the official
+# deepseek-ai/deepseek-harness npm release.
+#
+# * schedule     : every 6h resolve @deepseek-ai/dsh dist-tags.latest from
+#                  npm; if a build for that version (+this repo commit)
+#                  is not already on GHCR, build and push.
+# * manual       : run from the Actions tab anytime (force_build to skip
+#                  the already-built check).
+# * registry     : ghcr.io/<owner>/<repo> — uses only the built-in
+#                  GITHUB_TOKEN, no secrets required.
+# * tags pushed  : latest, dsh-<version>, build-<version>-<sha8>
+# * platforms    : linux/amd64 + linux/arm64
+#
+# NOTE: npm is the OFFICIAL release channel of DeepSeek Harness
+# (`npx @deepseek-ai/dsh web`); both unofficial reference images
+# (runzhliu, smanx) also package the npm dist, not a source build.
+# =====================================================================
+name: docker-build
+
+on:
+  workflow_dispatch:
+    inputs:
+      dsh_version:
+        description: "@deepseek-ai/dsh version to build (default: latest on npm)"
+        required: false
+        default: "latest"
+      force_build:
+        description: "Skip the already-built check and rebuild"
+        type: boolean
+        default: false
+  schedule:
+    - cron: "0 */6 * * *"
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: docker-build
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  check:
+    name: Resolve upstream + decide build
+    runs-on: ubuntu-latest
+    outputs:
+      dsh_version: ${{ steps.upstream.outputs.version }}
+      should_build: ${{ steps.decide.outputs.should_build }}
+      build_key: ${{ steps.decide.outputs.build_key }}
+    steps:
+      - name: Resolve latest upstream DSH version (npm)
+        id: upstream
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && \
+             [ "${{ github.event.inputs.dsh_version }}" != "latest" ] && \
+             [ -n "${{ github.event.inputs.dsh_version }}" ]; then
+            VER="${{ github.event.inputs.dsh_version }}"
+          else
+            VER="$(curl -fsSL 'https://registry.npmjs.org/@deepseek-ai%2Fdsh' \
+              | python3 -c "import json,sys;print(json.load(sys.stdin)['dist-tags']['latest'])")"
+          fi
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          echo "Upstream @deepseek-ai/dsh version: ${VER}"
+
+      - name: Check if already built
+        id: decide
+        env:
+          VER: ${{ steps.upstream.outputs.version }}
+          FORCE: ${{ github.event.inputs.force_build }}
+        run: |
+          SHA8="$(printf '%s' "${GITHUB_SHA}" | cut -c1-8)"
+          KEY="build-${VER}-${SHA8}"
+          echo "build_key=${KEY}" >> "$GITHUB_OUTPUT"
+          if [ "${FORCE}" = "true" ]; then
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "force_build requested -> building"
+            exit 0
+          fi
+          if docker manifest inspect "${IMAGE}:${KEY}" >/dev/null 2>&1; then
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+            echo "Image for dsh ${VER} + commit ${SHA8} already on GHCR -> skipping"
+          else
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "No image for dsh ${VER} + commit ${SHA8} -> building"
+          fi
+
+  build:
+    name: Build & push (amd64 + arm64)
+    needs: check
+    if: needs.check.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            DSH_VERSION=${{ needs.check.outputs.dsh_version }}
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:dsh-${{ needs.check.outputs.dsh_version }}
+            ${{ env.IMAGE }}:${{ needs.check.outputs.build_key }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Job summary
+        run: |
+          {
+            echo "## seek-harness image updated"
+            echo ""
+            echo "| Item | Value |"
+            echo "|---|---|"
+            echo "| Upstream version | \`${{ needs.check.outputs.dsh_version }}\` |"
+            echo "| Image | \`${{ env.IMAGE }}:latest\` |"
+            echo "| Version tag | \`:dsh-${{ needs.check.outputs.dsh_version }}\` |"
+            echo "| Build tag | \`${{ needs.check.outputs.build_key }}\` |"
+            echo "| Platforms | linux/amd64, linux/arm64 |"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,65 @@
+# =====================================================================
+# seek-harness — hardened deployment (runzhliu-style hardening)
+#
+#   cp .env.example .env   (then edit)
+#   docker compose pull
+#   DSH_WORKSPACE=/abs/path/to/project docker compose up -d
+#
+# Security model (base compose keeps everything locked down):
+#   * DSH listens on 127.0.0.1 INSIDE the container (upstream refuses
+#     0.0.0.0 by design); the built-in reverse proxy is the only public
+#     surface (the "0.0.0.0 fix").
+#   * Publishes to 127.0.0.1 by default. For LAN access set
+#     DSH_BIND=0.0.0.0 in .env AND enable Basic Auth — the Web UI has
+#     no auth of its own and can execute code.
+#   * cap_drop ALL / no-new-privileges / read-only rootfs / tmpfs /tmp.
+#   * Only the workspace bind is writable. Never mount ~, .ssh, cloud
+#     credentials, or docker.sock into the BASE compose file — use the
+#     compose.docker.yaml override for docker access.
+# =====================================================================
+
+services:
+  seek-harness:
+    image: ghcr.io/OWNER/REPO:latest
+    container_name: seek-harness
+    restart: unless-stopped
+    ports:
+      # DSH_BIND=127.0.0.1 (default, local only) or 0.0.0.0 (LAN, needs auth)
+      - "${DSH_BIND:-127.0.0.1}:${PROXY_PORT:-3080}:${PROXY_PORT:-3080}"
+    environment:
+      # 0.0.0.0 fix: DSH loopback port + public proxy port (must differ)
+      DSH_PORT: "${DSH_PORT:-3079}"
+      PROXY_PORT: "${PROXY_PORT:-3080}"
+      PROXY_HOST: "0.0.0.0"
+      # Optional Basic Auth on HTTP + WebSocket (enabled only when BOTH set)
+      PROXY_USERNAME: "${PROXY_USERNAME:-}"
+      PROXY_PASSWORD: "${PROXY_PASSWORD:-}"
+      # Extra authorities for DSH's /api browser-trust fence (comma list).
+      # Only needed behind your own authenticated reverse proxy.
+      DSH_TRUSTED_HOSTS: "${DSH_TRUSTED_HOSTS:-}"
+      # Docker engine access — either TCP proxy…
+      DOCKER_HOST: "${DOCKER_HOST:-}"
+      # …or mount /var/run/docker.sock via the compose.docker.yaml override
+      # upstream runtime knobs (safe defaults; see README)
+      DSH_TELEMETRY_DISABLED: "${DSH_TELEMETRY_DISABLED:-1}"
+      DSH_PERMISSION_MODE: "${DSH_PERMISSION_MODE:-}"
+      DSH_TOOLS_MODE: "${DSH_TOOLS_MODE:-}"
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      # DSH state: profiles / settings / credentials / sessions / storage
+      - dsh-home:/home/node/.dsh
+      # Agent workspace (the Web UI dir-selector treats /workspace as HOME)
+      - ${DSH_WORKSPACE:-./workspace}:/workspace
+    tmpfs:
+      - /tmp:exec,size=1g
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    init: false # tini runs INSIDE the image (PID 1, orphan reaping)
+
+volumes:
+  dsh-home:

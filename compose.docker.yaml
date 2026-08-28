@@ -1,0 +1,22 @@
+# =====================================================================
+# OPTIONAL override — Docker engine access via the host docker.sock.
+#
+#   docker compose -f compose.yaml -f compose.docker.yaml up -d
+#
+# TCP alternative (no override file needed): set DOCKER_HOST in .env,
+# e.g.  DOCKER_HOST=tcp://docker-socket-proxy:2375  — preferred when a
+# filtered proxy (tecnativa/docker-socket-proxy, etc.) is available.
+#
+# SECURITY: mounting docker.sock effectively grants root-equivalent
+# access to the HOST docker daemon. runzhliu forbids this in their
+# default setup; it is provided here because you explicitly asked for
+# it. Prefer the TCP proxy route with a filtered socket proxy.
+# =====================================================================
+
+services:
+  seek-harness:
+    group_add:
+      # gid of the host `docker` group (stat -c %g /var/run/docker.sock)
+      - "${DOCKER_GID:-999}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
