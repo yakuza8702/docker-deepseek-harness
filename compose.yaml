@@ -36,7 +36,8 @@ services:
       PROXY_USERNAME: "${PROXY_USERNAME:-}"
       PROXY_PASSWORD: "${PROXY_PASSWORD:-}"
       # Extra authorities for DSH's /api browser-trust fence (comma list).
-      # REQUIRED for LAN access — set to your LAN authority, e.g. 192.168.0.6:3080.
+      # OPTIONAL/legacy — the proxy now translates same-origin markers itself;
+      # only useful if you expose DSH's port without its proxy.
       DSH_TRUSTED_HOSTS: "${DSH_TRUSTED_HOSTS:-}"
       # Docker engine access — either TCP proxy…
       DOCKER_HOST: "${DOCKER_HOST:-}"

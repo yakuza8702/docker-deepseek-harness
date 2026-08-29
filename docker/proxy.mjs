@@ -287,10 +287,17 @@ function forwardToUpstream(req, res, autoAuthTried) {
         }
         bufferAndRewrite(upRes, res, (body) => {
           const str = body.toString("utf8");
-          const target = 'connection.isLoopback ? "host" : "memory"';
-          if (!str.includes(target)) return body;
+          // Refactor-tolerant: survive identifier renames / quote / spacing
+          // changes upstream; warn if a future version reshapes the decision.
+          const re = /[A-Za-z_$][\w$]*\.isLoopback\s*\?\s*["']host["']\s*:\s*["']memory["']/g;
+          const hits = str.match(re);
+          if (!hits) {
+            if (str.includes("isLoopback"))
+              console.log("[proxy] WARNING: isLoopback present but settings pattern missed - check upstream shape");
+            return body;
+          }
           console.log("[proxy] unlocked remote settings persistence in served JS");
-          return Buffer.from(str.split(target).join('"host"'), "utf8");
+          return Buffer.from(str.replace(re, '"host"'), "utf8");
         });
         return;
       }
