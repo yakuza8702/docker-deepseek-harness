@@ -1,10 +1,10 @@
 # =====================================================================
 # docker-build — keep :latest always current with the official
-# deepseek-ai/deepseek-harness npm release.
+# deepseek-ai/deepseek-harness releases.
 #
-# * schedule     : every 6h resolve @deepseek-ai/dsh dist-tags.latest from
-#                  npm; if a build for that version (+this repo commit)
-#                  is not already on GHCR, build and push.
+# * schedule     : every 6h resolve the newest release on the chosen
+#                  channel; if a build for that version (+this repo
+#                  commit) is not already on GHCR, build and push.
 # * manual       : run from the Actions tab anytime (force_build to skip
 #                  the already-built check).
 # * registry     : ghcr.io/<owner>/<repo> — uses only the built-in
@@ -12,9 +12,19 @@
 # * tags pushed  : latest, dsh-<version>, build-<version>-<sha8>
 # * platforms    : linux/amd64 + linux/arm64
 #
-# NOTE: npm is the OFFICIAL release channel of DeepSeek Harness
-# (`npx @deepseek-ai/dsh web`); both unofficial reference images
-# (runzhliu, smanx) also package the npm dist, not a source build.
+# CHANNELS
+#   npm (default) : @deepseek-ai/dsh dist-tags.latest — the OFFICIAL
+#                   release channel (`npx @deepseek-ai/dsh web`); also
+#                   what runzhliu & smanx package. Fast, slim, pinned.
+#                   NOTE: GitHub-only pre-releases/alphas that were never
+#                   published to npm cannot be installed this way.
+#   github-tag    : newest `dsh-v*` tag on the official GitHub repo —
+#                   INCLUDES pre-releases/alphas. Builds the upstream
+#                   monorepo from source (slow, much larger image).
+#                   Use for bleeding-edge tags like dsh-v0.1.2-alpha.1.
+#
+# Channel selection: workflow input (manual runs) > repository variable
+# `vars.DSH_CHANNEL` (also applies to the cron) > default "npm".
 # =====================================================================
 name: docker-build
 
@@ -25,6 +35,14 @@ on:
         description: "@deepseek-ai/dsh version to build (default: latest on npm)"
         required: false
         default: "latest"
+      channel:
+        description: "Release channel (overrides vars.DSH_CHANNEL)"
+        type: choice
+        default: ""
+        options:
+          - ""
+          - npm
+          - github-tag
       force_build:
         description: "Skip the already-built check and rebuild"
         type: boolean
@@ -49,22 +67,41 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       dsh_version: ${{ steps.upstream.outputs.version }}
+      source_ref: ${{ steps.upstream.outputs.source_ref }}
+      channel: ${{ steps.upstream.outputs.channel }}
       should_build: ${{ steps.decide.outputs.should_build }}
       build_key: ${{ steps.decide.outputs.build_key }}
     steps:
-      - name: Resolve latest upstream DSH version (npm)
+      - name: Resolve channel + latest upstream DSH version
         id: upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && \
-             [ "${{ github.event.inputs.dsh_version }}" != "latest" ] && \
-             [ -n "${{ github.event.inputs.dsh_version }}" ]; then
-            VER="${{ github.event.inputs.dsh_version }}"
+          # channel precedence: workflow input > repo variable vars.DSH_CHANNEL > npm
+          CH="${{ github.event.inputs.channel || vars.DSH_CHANNEL || 'npm' }}"
+          case "$CH" in npm|github-tag) ;; *) echo "Unknown channel '$CH'"; exit 1;; esac
+          echo "channel=${CH}" >> "$GITHUB_OUTPUT"
+
+          if [ "$CH" = "github-tag" ]; then
+            # newest dsh-v* tag from the official repo (includes pre-releases)
+            TAG="$(curl -fsSL 'https://api.github.com/repos/deepseek-ai/deepseek-harness/tags?per_page=100' \
+              | python3 -c "import json,sys;tags=json.load(sys.stdin);print(next(t['name'] for t in tags if t['name'].startswith('dsh-v')))")"
+            VER="${TAG#dsh-v}"
+            echo "source_ref=${TAG}" >> "$GITHUB_OUTPUT"
+            echo "Upstream source tag: ${TAG} (version ${VER})"
           else
-            VER="$(curl -fsSL 'https://registry.npmjs.org/@deepseek-ai%2Fdsh' \
-              | python3 -c "import json,sys;print(json.load(sys.stdin)['dist-tags']['latest'])")"
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ] && \
+               [ "${{ github.event.inputs.dsh_version }}" != "latest" ] && \
+               [ -n "${{ github.event.inputs.dsh_version }}" ]; then
+              VER="${{ github.event.inputs.dsh_version }}"
+            else
+              VER="$(curl -fsSL 'https://registry.npmjs.org/@deepseek-ai%2Fdsh' \
+                | python3 -c "import json,sys;print(json.load(sys.stdin)['dist-tags']['latest'])")"
+            fi
+            echo "source_ref=" >> "$GITHUB_OUTPUT"
+            echo "Upstream @deepseek-ai/dsh version: ${VER} (npm)"
           fi
           echo "version=${VER}" >> "$GITHUB_OUTPUT"
-          echo "Upstream @deepseek-ai/dsh version: ${VER}"
 
       - name: Check if already built
         id: decide
@@ -118,6 +155,7 @@ jobs:
           push: true
           build-args: |
             DSH_VERSION=${{ needs.check.outputs.dsh_version }}
+            DSH_SOURCE_REF=${{ needs.check.outputs.source_ref }}
           tags: |
             ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:dsh-${{ needs.check.outputs.dsh_version }}
@@ -132,6 +170,7 @@ jobs:
             echo ""
             echo "| Item | Value |"
             echo "|---|---|"
+            echo "| Channel | \`${{ needs.check.outputs.channel }}\` |"
             echo "| Upstream version | \`${{ needs.check.outputs.dsh_version }}\` |"
             echo "| Image | \`${{ env.IMAGE }}:latest\` |"
             echo "| Version tag | \`:dsh-${{ needs.check.outputs.dsh_version }}\` |"

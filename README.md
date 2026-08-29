@@ -107,15 +107,26 @@ No browser: no Chromium, no Xvfb, no noVNC, no `dsh-browser-desktop` plugin. DSH
 
 ## Auto-update workflow
 
-`.github/workflows/docker-build.yml` keeps `:latest` in sync with the official repo:
+`.github/workflows/docker-build.yml` keeps `:latest` in sync with the official project:
 
-- **every 6h** (cron) it resolves `dist-tags.latest` of `@deepseek-ai/dsh` on npm — the official release channel (`npx @deepseek-ai/dsh web`) — and compares it against what's already on GHCR
+- **every 6h** (cron) it resolves the newest release on the selected **channel** and compares it against what's already on GHCR
 - build key = `dsh <version>` + this repo's commit SHA → rebuilds only when **either** upstream releases a new version **or** this repo's Dockerfile changes
 - pushes `linux/amd64` + `linux/arm64` to `ghcr.io/<owner>/<repo>` with tags `latest`, `dsh-<version>`, `build-<version>-<sha8>`
 - manual **Run workflow** button always available (`force_build` to bypass the skip check)
 - uses only the built-in `GITHUB_TOKEN` — no secrets needed
 
 Point your docker manager (watchtower/Portainer/etc.) at `ghcr.io/OWNER/REPO:latest` and it will pick up every upstream update.
+
+### Release channels
+
+| Channel | Resolves | Build | Use when |
+|---|---|---|---|
+| `npm` (default) | `@deepseek-ai/dsh` `dist-tags.latest` on the npm registry | installs the official npm package (fast, slim, what runzhliu & smanx do) | normal operation. Caveat: GitHub-only pre-releases that were never published to npm can't be installed this way |
+| `github-tag` | newest `dsh-v*` tag on the official GitHub repo — **includes pre-releases/alphas** | clones + builds the upstream monorepo from source (slow, much larger image) | you want bleeding-edge tags like `dsh-v0.1.2-alpha.1` that npm doesn't have |
+
+Channel selection precedence: workflow input (manual run) > repository **variable** `DSH_CHANNEL` (Settings → Secrets and variables → Actions → Variables; also applies to the cron) > default `npm`.
+
+Example reality check (Aug 2026): npm `latest` = `0.1.1-rc.2`; GitHub has `dsh-v0.1.2-alpha.1` as a source-only pre-release (no npm package, no release assets). With the default channel a push builds `0.1.1-rc.2`; run the workflow once with `channel=github-tag` to build the alpha from source. The moment `0.1.2` (rc or final) is published to npm `latest`, the default channel picks it up automatically.
 
 ## Security model
 

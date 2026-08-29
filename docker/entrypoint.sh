@@ -19,7 +19,7 @@ DSH_PORT="${DSH_PORT:-3079}"
 PROXY_PORT="${PROXY_PORT:-3080}"
 PROXY_HOST="${PROXY_HOST:-0.0.0.0}"
 DSH_NODE_FLAGS="${DSH_NODE_FLAGS---expose-internals}"
-DSH_BIN="${DSH_BIN:-/opt/dsh/node_modules/.bin/dsh}"
+DSH_BIN="${DSH_BIN:-/usr/local/bin/dsh}"
 PROXY_SCRIPT="${PROXY_SCRIPT:-/opt/seek-harness/proxy.mjs}"
 
 log() { echo "[seek-harness] $*"; }
