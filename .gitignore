@@ -1,4 +1,5 @@
 .env
+compose.override.yaml
 workspace/
 *.log
 __pycache__/

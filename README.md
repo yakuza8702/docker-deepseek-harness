@@ -135,6 +135,19 @@ Example reality check (Aug 2026): npm `latest` = `0.1.1-rc.2`; GitHub has `dsh-v
 - The Web UI has **no auth of its own and can execute code** — it is a single-user, localhost tool. For LAN use set `DSH_BIND=0.0.0.0` **and** Basic Auth; never expose to the public internet
 - Docker socket access is opt-in and widens the trust boundary — prefer the filtered TCP proxy
 
+## Debugging with the read-only rootfs
+
+`read_only: true` locks the image layers (`/usr`, `/etc`, `/opt`, ...). The harness itself stays fully functional — all of its state is on mounts: the `dsh-home` volume (`/home/node/.dsh` — settings, sessions, credentials, plugins), the `/workspace` bind, and the `/tmp` tmpfs. If you need to poke at system paths (e.g. test an apt install or edit image files), create a local `compose.override.yaml` (compose merges it automatically; it is git-ignored):
+
+```yaml
+# compose.override.yaml — local debugging only, do not commit
+services:
+  seek-harness:
+    read_only: false
+```
+
+`docker compose up -d` then recreates the container with a writable rootfs; delete the file to return to the hardened posture. Need another persistent path (logs, exports)? Add a volume/bind for it in the same way rather than disabling `read_only` globally.
+
 ## Smoke test
 
 ```bash

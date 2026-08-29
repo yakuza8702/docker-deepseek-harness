@@ -52,6 +52,10 @@ services:
       - dsh-home:/home/node/.dsh
       # Agent workspace (the Web UI dir-selector treats /workspace as HOME)
       - ${DSH_WORKSPACE:-./workspace}:/workspace
+    # Writable temp space. NOT for a browser (there is none) — this exists
+    # because of `read_only: true` below: Node, npm/pnpm caches, python,
+    # uv/uvx temp venvs (MCP servers) and gcc all need /tmp, and `exec`
+    # lets them execute files placed there. size=1g caps RAM usage.
     tmpfs:
       - /tmp:exec,size=1g
     cap_drop:
