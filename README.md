@@ -111,7 +111,7 @@ No browser: no Chromium, no Xvfb, no noVNC, no `dsh-browser-desktop` plugin. DSH
 
 - **every 6h** (cron) it resolves the newest release on the selected **channel** and compares it against what's already on GHCR
 - build key = `dsh <version>` + this repo's commit SHA → rebuilds only when **either** upstream releases a new version **or** this repo's Dockerfile changes
-- pushes `linux/amd64` + `linux/arm64` to `ghcr.io/<owner>/<repo>` with tags `latest`, `dsh-<version>`, `build-<version>-<sha8>`
+- pushes `linux/amd64` (default; arm64 opt-in via workflow input or `vars.DSH_PLATFORMS`) to `ghcr.io/<owner>/<repo>` with tags `latest`, `dsh-<version>`, `build-<version>-<sha8>`
 - manual **Run workflow** button always available (`force_build` to bypass the skip check)
 - uses only the built-in `GITHUB_TOKEN` — no secrets needed
 

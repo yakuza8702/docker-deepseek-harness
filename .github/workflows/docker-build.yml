@@ -10,7 +10,9 @@
 # * registry     : ghcr.io/<owner>/<repo> — uses only the built-in
 #                  GITHUB_TOKEN, no secrets required.
 # * tags pushed  : latest, dsh-<version>, build-<version>-<sha8>
-# * platforms    : linux/amd64 + linux/arm64
+# * platforms    : linux/amd64 (default) — arm64 opt-in via workflow input
+#                  or repo variable vars.DSH_PLATFORMS (source builds for
+#                  arm64 run under slow QEMU emulation, avoid on free runners)
 #
 # CHANNELS
 #   npm (default) : @deepseek-ai/dsh dist-tags.latest — the OFFICIAL
@@ -47,6 +49,10 @@ on:
         description: "Skip the already-built check and rebuild"
         type: boolean
         default: false
+      platforms:
+        description: "Target platforms (comma-separated). Default linux/amd64. arm64 needs QEMU and makes source builds 5-15x slower"
+        required: false
+        default: "linux/amd64"
   schedule:
     - cron: "0 */6 * * *"
 
@@ -126,7 +132,7 @@ jobs:
           fi
 
   build:
-    name: Build & push (amd64 + arm64)
+    name: Build & push (${{ github.event.inputs.platforms || vars.DSH_PLATFORMS || 'linux/amd64' }})
     needs: check
     if: needs.check.outputs.should_build == 'true'
     runs-on: ubuntu-latest
@@ -134,7 +140,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up QEMU
+      - name: Set up QEMU (only needed for arm64)
+        if: contains((github.event.inputs.platforms || vars.DSH_PLATFORMS || 'linux/amd64'), 'arm64')
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
@@ -151,7 +158,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ github.event.inputs.platforms || vars.DSH_PLATFORMS || 'linux/amd64' }}
           push: true
           build-args: |
             DSH_VERSION=${{ needs.check.outputs.dsh_version }}
@@ -175,5 +182,5 @@ jobs:
             echo "| Image | \`${{ env.IMAGE }}:latest\` |"
             echo "| Version tag | \`:dsh-${{ needs.check.outputs.dsh_version }}\` |"
             echo "| Build tag | \`${{ needs.check.outputs.build_key }}\` |"
-            echo "| Platforms | linux/amd64, linux/arm64 |"
+            echo "| Platforms | \`${{ github.event.inputs.platforms || vars.DSH_PLATFORMS || 'linux/amd64' }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
