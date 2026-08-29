@@ -132,6 +132,23 @@ if [[ -n "$DSH_TOKEN" ]]; then
   printf '%s\n' "$DSH_TOKEN" > /tmp/dsh-token
   log "dsh web token captured — proxy auto-authenticates browsers (zero-auth LAN)"
 fi
+# The token line can land AFTER the HTTP listener answers (race seen in the
+# wild: banner said "n/a" while dsh printed its token moments later). Retry in
+# the background — the proxy re-reads /tmp/dsh-token per request, so auto-login
+# activates the moment the token appears, no restart needed.
+(
+  for _ in $(seq 1 300); do
+    tok="$(grep -m1 -oE '\?token=[A-Za-z0-9_-]+' "$DSH_LOG" 2>/dev/null | cut -d= -f2 || true)"
+    if [[ -n "$tok" ]]; then
+      printf '%s\n' "$tok" > /tmp/dsh-token
+      log "dsh web token captured (background retry) — auto-login active"
+      exit 0
+    fi
+    kill -0 "$DSH_PID" 2>/dev/null || exit 0
+    sleep 1
+  done
+  log "WARNING: boot token never appeared — zero-auth auto-login inactive"
+) &
 DSH_TOKEN_URL="$(grep -m1 -oE '/\?token=[A-Za-z0-9_-]+' "$DSH_LOG" 2>/dev/null || true)"
 
 AUTH_STATE="OFF"
@@ -146,7 +163,7 @@ log "=============================================================="
 log " DeepSeek Harness is ready (no browser stack included)"
 log "   local : http://127.0.0.1:${PROXY_PORT}/"
 log "   LAN   : http://<host-ip>:${PROXY_PORT}/   (basic auth: ${AUTH_STATE})"
-log "   token : ${DSH_TOKEN_URL:-n/a}   (append to your LAN URL; auto-login usually makes it unnecessary)"
+log "   token : ${DSH_TOKEN_URL:-pending (background capture)}   (append to your LAN URL; auto-login usually makes it unnecessary)"
 log "   WS channels are forwarded automatically by the proxy"
 log "   DSH pid=${DSH_PID}  proxy pid=${PROXY_PID}"
 log "=============================================================="
