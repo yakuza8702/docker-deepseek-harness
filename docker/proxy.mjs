@@ -34,6 +34,12 @@ const AUTH_PASS = process.env.PROXY_PASSWORD || "";
 const AUTH_ENABLED = AUTH_USER !== "" && AUTH_PASS !== "";
 const INJECT_POLYFILL = (process.env.PROXY_INJECT_POLYFILL ?? "1") !== "0";
 const MAX_HTML_BUFFER = 8 * 1024 * 1024;
+// DSH gates settings editing to loopback pages client-side (settings-scope:
+// connection.isLoopback ? "host" : "memory"). For LAN use, rewrite served JS
+// so every page gets host persistence. Set PROXY_UNLOCK_REMOTE_SETTINGS=0 to
+// keep stock behaviour.
+const UNLOCK_SETTINGS = process.env.PROXY_UNLOCK_REMOTE_SETTINGS !== "0";
+const MAX_JS_BUFFER = 32 * 1024 * 1024;
 // Boot token of `dsh web` (captured from its stdout by the entrypoint).
 // Empty = passthrough (plain 401 from DSH reaches the client).
 // The entrypoint starts this proxy BEFORE the token is printed, so the token
@@ -154,6 +160,29 @@ function pipeSockets(client, upstream, head) {
   upstream.on("close", () => client.destroy());
 }
 
+// Buffer a text response, run `fn`, and send the (possibly rewritten) body.
+function bufferAndRewrite(upRes, res, fn) {
+  const parts = [];
+  let size = 0;
+  upRes.on("data", (c) => { parts.push(c); size += c.length; });
+  upRes.on("end", () => {
+    if (size > MAX_JS_BUFFER) {
+      console.error("[proxy] JS chunk too large to rewrite; aborting");
+      if (!res.headersSent) res.writeHead(502, { "content-type": "text/plain" });
+      res.end("proxy: JS chunk too large to rewrite");
+      return;
+    }
+    const out = fn(Buffer.concat(parts));
+    const headers = { ...upRes.headers };
+    headers["content-length"] = String(out.length);
+    delete headers["content-encoding"];
+    delete headers["transfer-encoding"];
+    res.writeHead(upRes.statusCode, headers);
+    res.end(out);
+  });
+  upRes.on("error", () => res.destroy());
+}
+
 function looksLikeNavigation(req) {
   const sfm = String(req.headers["sec-fetch-mode"] || "");
   if (sfm) return sfm === "navigate";
@@ -171,6 +200,9 @@ function forwardToUpstream(req, res, autoAuthTried) {
   // we cannot regex-inject into gzip/br bytes. Request navigations as identity
   // (non-document assets keep Accept-Encoding and stream through untouched).
   if (looksLikeNavigation(req)) delete headers["accept-encoding"];
+  if (UNLOCK_SETTINGS && /\/plugins\/|\.js(?:\?|$)/.test(req.url || "")) {
+    delete headers["accept-encoding"]; // JS may need the settings rewrite
+  }
   // DSH's /api fence requires browser markers (Origin/Referer) to be same-origin
   // with the authority DSH sees (the rewritten loopback Host). Translate the
   // public authority to the loopback one - but only when the request is
@@ -238,12 +270,28 @@ function forwardToUpstream(req, res, autoAuthTried) {
       }
       const ctype = String(upRes.headers["content-type"] || "");
       const isHtml = ctype.toLowerCase().includes("text/html");
+      const isJs = /javascript|ecmascript/.test(ctype.toLowerCase());
       // Safety net: never touch a compressed body - stream it through so the
       // client can decode it (polyfill skipped in that rare case).
       const encoded = Boolean(upRes.headers["content-encoding"]);
-      if (!isHtml || !INJECT_POLYFILL || encoded) {
+      if (encoded || (!isHtml && !isJs) || (isHtml && !INJECT_POLYFILL)) {
         res.writeHead(upRes.statusCode, upRes.headers);
         upRes.pipe(res);
+        return;
+      }
+      if (isJs) {
+        if (!UNLOCK_SETTINGS) {
+          res.writeHead(upRes.statusCode, upRes.headers);
+          upRes.pipe(res);
+          return;
+        }
+        bufferAndRewrite(upRes, res, (body) => {
+          const str = body.toString("utf8");
+          const target = 'connection.isLoopback ? "host" : "memory"';
+          if (!str.includes(target)) return body;
+          console.log("[proxy] unlocked remote settings persistence in served JS");
+          return Buffer.from(str.split(target).join('"host"'), "utf8");
+        });
         return;
       }
       // Buffer HTML (small SPA shells), inject the polyfill once.
