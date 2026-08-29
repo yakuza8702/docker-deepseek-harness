@@ -9,9 +9,10 @@
 #   * DSH listens on 127.0.0.1 INSIDE the container (upstream refuses
 #     0.0.0.0 by design); the built-in reverse proxy is the only public
 #     surface (the "0.0.0.0 fix").
-#   * Publishes to 127.0.0.1 by default. For LAN access set
-#     DSH_BIND=0.0.0.0 in .env AND enable Basic Auth — the Web UI has
-#     no auth of its own and can execute code.
+#   * Publishes to 127.0.0.1 by default. For LAN access set DSH_BIND=0.0.0.0 —
+#     the proxy auto-mints browser sessions from dsh web's boot token
+#     (zero-auth LAN). Set PROXY_USERNAME+PROXY_PASSWORD to require Basic
+#     Auth if other LAN devices should stay out.
 #   * cap_drop ALL / no-new-privileges / read-only rootfs / tmpfs /tmp.
 #   * Only the workspace bind is writable. Never mount ~, .ssh, cloud
 #     credentials, or docker.sock into the BASE compose file — use the

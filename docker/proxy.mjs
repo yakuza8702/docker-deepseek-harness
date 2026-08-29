@@ -8,6 +8,9 @@
  *   - HTTP + WebSocket forwarding (/api/events.mux, /api/events.host, ...)
  *   - optional HTTP Basic Auth (HTTP *and* WS) when PROXY_USERNAME and
  *     PROXY_PASSWORD are both set
+ *   - zero-auth LAN auto-login: the entrypoint captures the token `dsh web`
+ *     prints at boot (DSH_TOKEN) and the proxy relays the 303 + session
+ *     cookie it returns, so browsers just open the bare URL — no login
  *   - a crypto.randomUUID polyfill injected into served HTML — pages loaded
  *     over a LAN IP are a browser "non-secure context" where randomUUID is
  *     unavailable, which would leave the realtime WS channel pending forever
@@ -30,6 +33,9 @@ const AUTH_PASS = process.env.PROXY_PASSWORD || "";
 const AUTH_ENABLED = AUTH_USER !== "" && AUTH_PASS !== "";
 const INJECT_POLYFILL = (process.env.PROXY_INJECT_POLYFILL ?? "1") !== "0";
 const MAX_HTML_BUFFER = 8 * 1024 * 1024;
+// Boot token of `dsh web` (captured from its stdout by the entrypoint).
+// Empty = passthrough (plain 401 from DSH reaches the client).
+const DSH_TOKEN = process.env.DSH_TOKEN || "";
 
 // Static, non-sensitive assets are served without auth (smanx behaviour);
 // forcing auth here makes browsers spam 401s for <link rel="manifest">.
@@ -130,9 +136,13 @@ function pipeSockets(client, upstream, head) {
   upstream.on("close", () => client.destroy());
 }
 
-const server = http.createServer((req, res) => {
-  if (!checkAuth(req, false)) return deny(res, false);
+function looksLikeNavigation(req) {
+  const sfm = String(req.headers["sec-fetch-mode"] || "");
+  if (sfm) return sfm === "navigate";
+  return String(req.headers.accept || "").includes("text/html");
+}
 
+function forwardToUpstream(req, res, autoAuthTried) {
   const headers = { ...req.headers };
   // Present the loopback authority to DSH so its browser-trust fence and
   // host checks behave as if the request were local.
@@ -143,6 +153,42 @@ const server = http.createServer((req, res) => {
   const upstream = http.request(
     { host: DSH_HOST, port: DSH_PORT, method: req.method, path: req.url, headers },
     (upRes) => {
+      // Zero-auth LAN mode: `dsh web` answers 401 to navigations without a
+      // session. Re-request once with the boot token and relay the 303 +
+      // Set-Cookie it returns — the browser gets a session without ever
+      // seeing a token. Non-navigations (API/WS clients) keep the plain 401.
+      if (
+        upRes.statusCode === 401 &&
+        !autoAuthTried &&
+        DSH_TOKEN &&
+        looksLikeNavigation(req)
+      ) {
+        upRes.resume(); // drain and discard
+        const sep = req.url.includes("?") ? "&" : "?";
+        const authed = http.request(
+          {
+            host: DSH_HOST,
+            port: DSH_PORT,
+            method: req.method,
+            path: `${req.url}${sep}token=${encodeURIComponent(DSH_TOKEN)}`,
+            headers,
+          },
+          (authRes) => {
+            res.writeHead(authRes.statusCode, authRes.headers);
+            authRes.pipe(res);
+          }
+        );
+        authed.on("error", (err) => {
+          if (err.code === "ECONNREFUSED" || err.code === "ECONNRESET") {
+            upstreamUnavailable(res, false);
+          } else {
+            res.writeHead(502, { "Content-Type": "text/plain" });
+            res.end("502 Bad Gateway");
+          }
+        });
+        authed.end();
+        return;
+      }
       const ctype = String(upRes.headers["content-type"] || "");
       const isHtml = ctype.toLowerCase().includes("text/html");
       if (!isHtml || !INJECT_POLYFILL) {
@@ -197,6 +243,11 @@ const server = http.createServer((req, res) => {
     }
   });
   req.pipe(upstream);
+}
+
+const server = http.createServer((req, res) => {
+  if (!checkAuth(req, false)) return deny(res, false);
+  forwardToUpstream(req, res, false);
 });
 
 // WebSocket upgrade → raw TCP tunnel (headers pass through untouched,
@@ -226,6 +277,10 @@ server.on("upgrade", (req, socket, head) => {
 server.listen(PROXY_PORT, PROXY_HOST, () => {
   console.log(
     `[proxy] listening on ${PROXY_HOST}:${PROXY_PORT} -> http://${DSH_HOST}:${DSH_PORT}` +
-      (AUTH_ENABLED ? " (basic auth ON)" : " (basic auth OFF)")
+      (AUTH_ENABLED
+        ? " (basic auth ON)"
+        : DSH_TOKEN
+          ? " (basic auth OFF, zero-auth auto-login)"
+          : " (basic auth OFF)")
   );
 });

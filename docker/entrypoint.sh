@@ -87,11 +87,17 @@ fi
 declare -a node_flags=()
 [[ -n "$DSH_NODE_FLAGS" ]] && read -r -a node_flags <<< "$DSH_NODE_FLAGS"
 
+# DSH output goes to a log file (streamed to container logs by a tail helper)
+# so the boot token can be extracted for the proxy's zero-auth auto-login.
+DSH_LOG=/tmp/dsh-web.log
+: > "$DSH_LOG"
 log "starting DSH web on 127.0.0.1:${DSH_PORT} (DSH_HOME=${DSH_HOME:-unset}, HOME=${HOME})"
 node "${node_flags[@]}" "$DSH_BIN" web \
   --no-open --host 127.0.0.1 --port "$DSH_PORT" \
-  ${trusted_args[@]+"${trusted_args[@]}"} "$@" &
+  ${trusted_args[@]+"${trusted_args[@]}"} "$@" >"$DSH_LOG" 2>&1 &
 DSH_PID=$!
+tail -F "$DSH_LOG" 2>/dev/null &
+TAIL_PID=$!
 
 log "starting reverse proxy on ${PROXY_HOST}:${PROXY_PORT}"
 node "$PROXY_SCRIPT" &
@@ -99,7 +105,7 @@ PROXY_PID=$!
 
 terminate() {
   log "signal received — stopping DSH (${DSH_PID}) and proxy (${PROXY_PID})"
-  kill -TERM "$DSH_PID" "$PROXY_PID" 2>/dev/null || true
+  kill -TERM "$DSH_PID" "$PROXY_PID" ${TAIL_PID:+"$TAIL_PID"} 2>/dev/null || true
 }
 trap terminate TERM INT
 
@@ -114,6 +120,18 @@ for i in $(seq 1 120); do
   sleep 1
 done
 
+# Zero-auth LAN mode: `dsh web` generates a session token at boot and prints
+# its URL. Capture it and hand it to the reverse proxy so it can transparently
+# mint browser sessions — the user just opens the bare LAN URL. The token is
+# in-memory per boot; that is fine because the proxy re-mints on next visit.
+DSH_TOKEN=""
+[[ -s "$DSH_LOG" ]] && DSH_TOKEN="$(grep -m1 -oE '\?token=[A-Za-z0-9_-]+' "$DSH_LOG" | cut -d= -f2 || true)"
+if [[ -n "$DSH_TOKEN" ]]; then
+  export DSH_TOKEN
+  log "dsh web token captured — proxy auto-authenticates browsers (zero-auth LAN)"
+fi
+DSH_TOKEN_URL="$(grep -m1 -oE 'http://[^ ]*token=[A-Za-z0-9_-]+' "$DSH_LOG" 2>/dev/null || true)"
+
 AUTH_STATE="OFF"
 [[ -n "${PROXY_USERNAME:-}" && -n "${PROXY_PASSWORD:-}" ]] && AUTH_STATE="ON"
 
@@ -126,6 +144,7 @@ log "=============================================================="
 log " DeepSeek Harness is ready (no browser stack included)"
 log "   local : http://127.0.0.1:${PROXY_PORT}/"
 log "   LAN   : http://<host-ip>:${PROXY_PORT}/   (basic auth: ${AUTH_STATE})"
+log "   token : ${DSH_TOKEN_URL:-n/a}   (fallback; auto-login usually makes it unnecessary)"
 log "   WS channels are forwarded automatically by the proxy"
 log "   DSH pid=${DSH_PID}  proxy pid=${PROXY_PID}"
 log "=============================================================="
