@@ -91,6 +91,7 @@ declare -a node_flags=()
 # so the boot token can be extracted for the proxy's zero-auth auto-login.
 DSH_LOG=/tmp/dsh-web.log
 : > "$DSH_LOG"
+: > /tmp/dsh-token
 log "starting DSH web on 127.0.0.1:${DSH_PORT} (DSH_HOME=${DSH_HOME:-unset}, HOME=${HOME})"
 node "${node_flags[@]}" "$DSH_BIN" web \
   --no-open --host 127.0.0.1 --port "$DSH_PORT" \
@@ -128,9 +129,10 @@ DSH_TOKEN=""
 [[ -s "$DSH_LOG" ]] && DSH_TOKEN="$(grep -m1 -oE '\?token=[A-Za-z0-9_-]+' "$DSH_LOG" | cut -d= -f2 || true)"
 if [[ -n "$DSH_TOKEN" ]]; then
   export DSH_TOKEN
+  printf '%s\n' "$DSH_TOKEN" > /tmp/dsh-token
   log "dsh web token captured — proxy auto-authenticates browsers (zero-auth LAN)"
 fi
-DSH_TOKEN_URL="$(grep -m1 -oE 'http://[^ ]*token=[A-Za-z0-9_-]+' "$DSH_LOG" 2>/dev/null || true)"
+DSH_TOKEN_URL="$(grep -m1 -oE '/\?token=[A-Za-z0-9_-]+' "$DSH_LOG" 2>/dev/null || true)"
 
 AUTH_STATE="OFF"
 [[ -n "${PROXY_USERNAME:-}" && -n "${PROXY_PASSWORD:-}" ]] && AUTH_STATE="ON"
@@ -144,7 +146,7 @@ log "=============================================================="
 log " DeepSeek Harness is ready (no browser stack included)"
 log "   local : http://127.0.0.1:${PROXY_PORT}/"
 log "   LAN   : http://<host-ip>:${PROXY_PORT}/   (basic auth: ${AUTH_STATE})"
-log "   token : ${DSH_TOKEN_URL:-n/a}   (fallback; auto-login usually makes it unnecessary)"
+log "   token : ${DSH_TOKEN_URL:-n/a}   (append to your LAN URL; auto-login usually makes it unnecessary)"
 log "   WS channels are forwarded automatically by the proxy"
 log "   DSH pid=${DSH_PID}  proxy pid=${PROXY_PID}"
 log "=============================================================="

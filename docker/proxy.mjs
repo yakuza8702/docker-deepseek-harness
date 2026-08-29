@@ -22,6 +22,7 @@
  */
 import http from "node:http";
 import net from "node:net";
+import fs from "node:fs";
 import { timingSafeEqual } from "node:crypto";
 
 const PROXY_HOST = process.env.PROXY_HOST || "0.0.0.0";
@@ -35,7 +36,24 @@ const INJECT_POLYFILL = (process.env.PROXY_INJECT_POLYFILL ?? "1") !== "0";
 const MAX_HTML_BUFFER = 8 * 1024 * 1024;
 // Boot token of `dsh web` (captured from its stdout by the entrypoint).
 // Empty = passthrough (plain 401 from DSH reaches the client).
+// The entrypoint starts this proxy BEFORE the token is printed, so the token
+// is read lazily from a file too (env DSH_TOKEN wins for tests/tools).
 const DSH_TOKEN = process.env.DSH_TOKEN || "";
+const DSH_TOKEN_FILE = process.env.DSH_TOKEN_FILE || "/tmp/dsh-token";
+let _tokenLogged = false;
+function getDshToken() {
+  if (DSH_TOKEN) return DSH_TOKEN;
+  try {
+    const t = fs.readFileSync(DSH_TOKEN_FILE, "utf8").trim();
+    if (t && !_tokenLogged) {
+      _tokenLogged = true;
+      console.log("[proxy] zero-auth auto-login enabled (dsh web token loaded)");
+    }
+    return t;
+  } catch {
+    return "";
+  }
+}
 
 // Static, non-sensitive assets are served without auth (smanx behaviour);
 // forcing auth here makes browsers spam 401s for <link rel="manifest">.
@@ -160,7 +178,7 @@ function forwardToUpstream(req, res, autoAuthTried) {
       if (
         upRes.statusCode === 401 &&
         !autoAuthTried &&
-        DSH_TOKEN &&
+        getDshToken() &&
         looksLikeNavigation(req)
       ) {
         upRes.resume(); // drain and discard
@@ -170,7 +188,7 @@ function forwardToUpstream(req, res, autoAuthTried) {
             host: DSH_HOST,
             port: DSH_PORT,
             method: req.method,
-            path: `${req.url}${sep}token=${encodeURIComponent(DSH_TOKEN)}`,
+            path: `${req.url}${sep}token=${encodeURIComponent(getDshToken())}`,
             headers,
           },
           (authRes) => {
