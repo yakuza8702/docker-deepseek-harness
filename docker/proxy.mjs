@@ -304,12 +304,31 @@ const server = http.createServer((req, res) => {
 // incl. the Authorization header already validated above).
 server.on("upgrade", (req, socket, head) => {
   if (!checkAuth(req, true)) return deny(socket, true);
+  // Same-origin Origin translation for WS handshakes: DSH's /api fence also
+  // gates upgrades (browsers attach Origin to them). Translate the public
+  // authority to the loopback one only when the handshake is same-origin at
+  // the public edge; foreign origins pass through so the fence rejects them.
+  let originOverride = null;
+  {
+    const ph = req.headers.host || "";
+    const oh = req.headers.origin;
+    if (ph && typeof oh === "string" && oh !== "null") {
+      try {
+        if (new URL(oh).host === ph) originOverride = `http://${DSH_HOST}:${DSH_PORT}`;
+      } catch {}
+    }
+  }
   const upstream = net.connect(DSH_PORT, DSH_HOST, () => {
     const lines = [`${req.method} ${req.url} HTTP/1.1`];
     for (let i = 0; i < req.rawHeaders.length; i += 2) {
       const name = req.rawHeaders[i];
+      const lower = name.toLowerCase();
       const value =
-        name.toLowerCase() === "host" ? `${DSH_HOST}:${DSH_PORT}` : req.rawHeaders[i + 1];
+        lower === "origin" && originOverride
+          ? originOverride
+          : lower === "host"
+            ? `${DSH_HOST}:${DSH_PORT}`
+            : req.rawHeaders[i + 1];
       lines.push(`${name}: ${value}`);
     }
     upstream.write(lines.join("\r\n") + "\r\n\r\n");
