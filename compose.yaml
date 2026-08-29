@@ -20,7 +20,7 @@
 
 services:
   seek-harness:
-    image: ghcr.io/OWNER/REPO:latest
+    image: ghcr.io/yakuza8702/docker-deepseek-harness:latest
     container_name: seek-harness
     restart: unless-stopped
     ports:

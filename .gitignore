@@ -1,6 +1,10 @@
 .env
 compose.override.yaml
 workspace/
+# private keys — NEVER commit
+git-priv-key
+git-priv-keys
+*.pem
 *.log
 __pycache__/
 node_modules/

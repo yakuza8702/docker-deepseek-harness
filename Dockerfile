@@ -76,7 +76,7 @@ ARG PNPM_VERSION=10
 LABEL org.opencontainers.image.title="seek-harness" \
       org.opencontainers.image.description="Hardened DeepSeek Harness container — smanx devtools + 0.0.0.0 reverse-proxy fix + runzhliu hardening + docker.sock/TCP support, no browser" \
       org.opencontainers.image.licenses="MIT" \
-      org.opencontainers.image.source="https://github.com/OWNER/REPO" \
+      org.opencontainers.image.source="https://github.com/yakuza8702/docker-deepseek-harness" \
       org.opencontainers.image.version="${DSH_VERSION}"
 
 ENV NPM_CONFIG_CACHE=/tmp/.npm-cache \

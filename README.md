@@ -32,25 +32,25 @@ DSH_WORKSPACE=/abs/path/to/project docker compose up -d
 ## Quick start (plain docker run)
 
 ```bash
-docker pull ghcr.io/OWNER/REPO:latest
+docker pull ghcr.io/yakuza8702/docker-deepseek-harness:latest
 
 docker run -d --name seek-harness \
   -p 3080:3080 \
   -v seek-harness-home:/home/node/.dsh \
   -v "$PWD":/workspace \
   --restart unless-stopped \
-  ghcr.io/OWNER/REPO:latest
+  ghcr.io/yakuza8702/docker-deepseek-harness:latest
 ```
 
 Other entrypoint forms:
 
 ```bash
 # flags go straight to dsh (headless one-shot)
-docker run --rm -v "$PWD":/workspace ghcr.io/OWNER/REPO:latest \
+docker run --rm -v "$PWD":/workspace ghcr.io/yakuza8702/docker-deepseek-harness:latest \
   --profile headless "summarize this repository"
 
 # arbitrary command (shell into the devtools image)
-docker run --rm -it --entrypoint bash ghcr.io/OWNER/REPO:latest
+docker run --rm -it --entrypoint bash ghcr.io/yakuza8702/docker-deepseek-harness:latest
 ```
 
 ## Docker engine access (agent can run docker)
@@ -115,7 +115,7 @@ No browser: no Chromium, no Xvfb, no noVNC, no `dsh-browser-desktop` plugin. DSH
 - manual **Run workflow** button always available (`force_build` to bypass the skip check)
 - uses only the built-in `GITHUB_TOKEN` — no secrets needed
 
-Point your docker manager (watchtower/Portainer/etc.) at `ghcr.io/OWNER/REPO:latest` and it will pick up every upstream update.
+Point your docker manager (watchtower/Portainer/etc.) at `ghcr.io/yakuza8702/docker-deepseek-harness:latest` and it will pick up every upstream update.
 
 ### Release channels
 
@@ -151,15 +151,16 @@ services:
 ## Smoke test
 
 ```bash
-docker run --rm --entrypoint dsh ghcr.io/OWNER/REPO:latest --version   # prints pinned DSH version
-docker run --rm --entrypoint bash ghcr.io/OWNER/REPO:latest -c \
+docker run --rm --entrypoint dsh ghcr.io/yakuza8702/docker-deepseek-harness:latest --version   # prints pinned DSH version
+docker run --rm --entrypoint bash ghcr.io/yakuza8702/docker-deepseek-harness:latest -c \
   'docker --version && docker compose version && pnpm --version && uv --version && bwrap --version'
 docker compose up -d && curl -fsS http://127.0.0.1:3080/ && docker compose ps   # healthy
 ```
 
-## After adding the git remote
+## Image coordinates
 
-Replace the `OWNER/REPO` placeholders (`grep -rn "OWNER/REPO" .` → README, compose.yaml, Dockerfile LABEL) with your real `ghcr.io/<owner>/<repo>`. The workflow itself derives the image name from `github.repository`, so it needs no edits.
+- Git: `git@github.com:yakuza8702/docker-deepseek-harness.git`
+- Image: `ghcr.io/yakuza8702/docker-deepseek-harness:latest` — the workflow derives the image name from `github.repository`, so no per-run edits are needed. After the first push, trigger it once from **Actions → docker-build → Run workflow** (or wait for the 6h cron), then point your docker manager at `:latest`.
 
 ## Credits
 
