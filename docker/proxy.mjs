@@ -167,6 +167,10 @@ function forwardToUpstream(req, res, autoAuthTried) {
   headers.host = `${DSH_HOST}:${DSH_PORT}`;
   headers["x-forwarded-host"] = req.headers.host || "";
   headers["x-forwarded-proto"] = "http";
+  // Polyfill injection needs plain-text HTML; if DSH compresses the document
+  // we cannot regex-inject into gzip/br bytes. Request navigations as identity
+  // (non-document assets keep Accept-Encoding and stream through untouched).
+  if (looksLikeNavigation(req)) delete headers["accept-encoding"];
 
   const upstream = http.request(
     { host: DSH_HOST, port: DSH_PORT, method: req.method, path: req.url, headers },
@@ -209,7 +213,10 @@ function forwardToUpstream(req, res, autoAuthTried) {
       }
       const ctype = String(upRes.headers["content-type"] || "");
       const isHtml = ctype.toLowerCase().includes("text/html");
-      if (!isHtml || !INJECT_POLYFILL) {
+      // Safety net: never touch a compressed body - stream it through so the
+      // client can decode it (polyfill skipped in that rare case).
+      const encoded = Boolean(upRes.headers["content-encoding"]);
+      if (!isHtml || !INJECT_POLYFILL || encoded) {
         res.writeHead(upRes.statusCode, upRes.headers);
         upRes.pipe(res);
         return;
