@@ -5,6 +5,8 @@ workspace/
 git-priv-key
 git-priv-keys
 *.pem
+# GitHub API tokens — NEVER commit
+gh-pat*
 *.log
 __pycache__/
 node_modules/
