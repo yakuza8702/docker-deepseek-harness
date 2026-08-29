@@ -171,6 +171,31 @@ function forwardToUpstream(req, res, autoAuthTried) {
   // we cannot regex-inject into gzip/br bytes. Request navigations as identity
   // (non-document assets keep Accept-Encoding and stream through untouched).
   if (looksLikeNavigation(req)) delete headers["accept-encoding"];
+  // DSH's /api fence requires browser markers (Origin/Referer) to be same-origin
+  // with the authority DSH sees (the rewritten loopback Host). Translate the
+  // public authority to the loopback one - but only when the request is
+  // same-origin at the public edge (Origin.host === incoming Host).
+  // Cross-origin markers (CSRF from another site) pass through untouched so
+  // the fence can still reject them.
+  const publicHost = req.headers.host || "";
+  const originHeader = req.headers.origin;
+  if (publicHost && typeof originHeader === "string" && originHeader !== "null") {
+    try {
+      if (new URL(originHeader).host === publicHost) {
+        const internal = `http://${DSH_HOST}:${DSH_PORT}`;
+        headers.origin = internal;
+        const referer = req.headers.referer;
+        if (typeof referer === "string") {
+          try {
+            const refUrl = new URL(referer);
+            if (refUrl.host === publicHost) {
+              headers.referer = `${internal}${refUrl.pathname}${refUrl.search}`;
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+  }
 
   const upstream = http.request(
     { host: DSH_HOST, port: DSH_PORT, method: req.method, path: req.url, headers },
