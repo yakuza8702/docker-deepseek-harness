@@ -89,7 +89,7 @@ Inside the container: `docker ps`, `docker compose version`, `docker build ...` 
 | `PROXY_HOST` | `0.0.0.0` | Proxy bind address inside the container |
 | `PROXY_USERNAME` / `PROXY_PASSWORD` | unset | Basic Auth (HTTP+WS); enabled only when **both** set |
 | `PROXY_INJECT_POLYFILL` | `1` | Inject the `crypto.randomUUID` polyfill into HTML |
-| `DSH_TRUSTED_HOSTS` | empty | Comma-list of extra `host[:port]` authorities for DSH's `/api` trust fence (advanced, behind your own auth proxy) |
+| `DSH_TRUSTED_HOSTS` | empty | **REQUIRED for LAN access.** Comma-list of `host[:port]` authorities DSH's `/api` trust fence accepts — set to your LAN authority, e.g. `192.168.0.6:3080`. Without it, `/api` calls (models, plugins, settings) return 403 |
 | `DOCKER_HOST` | unset | Docker proxy over TCP (e.g. `tcp://socket-proxy:2375`) |
 | `DOCKER_GID` | `999` | Host docker group gid for the `compose.docker.yaml` override |
 | `DSH_WORKSPACE` | `./workspace` | Compose-only: workspace bind source |
