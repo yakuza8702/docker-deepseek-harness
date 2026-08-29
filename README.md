@@ -97,7 +97,7 @@ Inside the container: `docker ps`, `docker compose version`, `docker build ...` 
 | `DSH_BIND` | `127.0.0.1` | Compose-only: host publish address (`0.0.0.0` = LAN) |
 | `DEEPSEEK_API_KEY` | unset | Runtime credential (or configure in the Web UI settings) |
 | `DSH_TELEMETRY_DISABLED` | `1` | Hard-disabled locally by default (empty = upstream default) |
-| `DSH_PERMISSION_MODE` | unset | `read-only` / `workspace-write` / `danger-full-access` |
+| `DSH_PERMISSION_MODE` | unset | `read-only` / `workspace-write` / `danger-full-access` — confined modes use the bundled Landlock launcher (kernel ≥ 5.13); on kernels without it use `danger-full-access` |
 | `DSH_TOOLS_MODE` | unset | `native` / `ptc` / `both` |
 | `DSH_NODE_FLAGS` | `--expose-internals` | Node flags for the DSH main process only (agent children don't inherit) |
 
