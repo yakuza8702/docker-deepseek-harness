@@ -73,6 +73,7 @@ FROM ${NODE_IMAGE}
 ARG DSH_VERSION=latest
 ARG DSH_SOURCE_REF
 ARG PNPM_VERSION=10
+ARG TARGETARCH=amd64
 LABEL org.opencontainers.image.title="seek-harness" \
       org.opencontainers.image.description="Hardened DeepSeek Harness container — smanx devtools + 0.0.0.0 reverse-proxy fix + runzhliu hardening + docker.sock/TCP support, no browser" \
       org.opencontainers.image.licenses="MIT" \
@@ -125,6 +126,27 @@ RUN if [ -f /opt/dsh/node_modules/.bin/dsh ]; then \
    && echo "installed @deepseek-ai/dsh $(cat /opt/dsh-src/.dsh-version) (source)"; \
     fi \
  && dsh --version
+
+# Landlock launcher binary. The source-channel monorepo links the workspace
+# package native/landlock-run/packages/linux-<arch> but its bin/ only ships in
+# the published platform npm package (the npm channel gets it automatically via
+# optionalDependencies). Without this file DSH's sandbox probes unusable and
+# workspace-write/read-only permission modes fail closed. Fetching the binary
+# restores real sandboxing WITHOUT relaxing the container seccomp profile.
+RUN if [ -n "${DSH_SOURCE_REF}" ]; then \
+      P="linux-${TARGETARCH}"; D="/opt/dsh-src/native/landlock-run/packages/$P"; \
+      if [ -d "$D" ] && [ ! -x "$D/bin/landlock-run" ]; then \
+        V=$(node -p "require('$D/package.json').version" 2>/dev/null || echo latest); \
+        cd /tmp && { \
+          T=$(npm pack --silent "@deepseek-ai/node-addon-landlock-run-$P@${V}" | tail -n1) \
+          && tar xzf "$T" package/bin/landlock-run \
+          && mkdir -p "$D/bin" \
+          && install -m 755 package/bin/landlock-run "$D/bin/landlock-run" \
+          && rm -rf /tmp/package "/tmp/$T" \
+          && echo "landlock launcher installed ($P ${V})"; \
+        } || echo "WARNING: landlock launcher install failed - sandbox modes unavailable at runtime"; \
+      fi; \
+    fi
 
 # Reverse proxy ("0.0.0.0 fix", smanx pattern) + entrypoint
 COPY docker/proxy.mjs docker/entrypoint.sh /opt/seek-harness/
