@@ -68,6 +68,12 @@ services:
       # 0.1.2-alpha.3) so ecosystem plugins that still import it keep loading.
       # Remove once the plugins ship alpha3-compatible releases.
       - ./overrides/settings-index.js:/opt/dsh-src/packages/settings/settings/lib/index.js:ro
+      # FIX 2026-09-01: guarantee the Landlock launcher even if the image was
+      # built before the Dockerfile fix (arch mapping bug left source-channel
+      # images without the binary — sandbox modes failed closed). Harmless when
+      # the image already bundles it: the mount shadows it with the same
+      # contract binary. Remove once all your nodes run a fixed image.
+      - ./overrides/landlock-run/linux-x64/landlock-run:/opt/dsh-src/native/landlock-run/packages/linux-x64/bin/landlock-run:ro
     # Writable temp space. NOT for a browser (there is none) — this exists
     # because of `read_only: true` below: Node, npm/pnpm caches, python,
     # uv/uvx temp venvs (MCP servers) and gcc all need /tmp, and `exec`

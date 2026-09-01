@@ -133,18 +133,34 @@ RUN if [ -f /opt/dsh/node_modules/.bin/dsh ]; then \
 # optionalDependencies). Without this file DSH's sandbox probes unusable and
 # workspace-write/read-only permission modes fail closed. Fetching the binary
 # restores real sandboxing WITHOUT relaxing the container seccomp profile.
-RUN if [ -n "${DSH_SOURCE_REF}" ]; then \
-      P="linux-${TARGETARCH}"; D="/opt/dsh-src/native/landlock-run/packages/$P"; \
-      if [ -d "$D" ] && [ ! -x "$D/bin/landlock-run" ]; then \
+#
+# FIX 2026-09-01: this step previously computed the package dir as
+# "linux-${TARGETARCH}" — Docker's TARGETARCH is amd64/arm64 while the package
+# dirs (and npm platform packages) use NODE arch names x64/arm64, so the dir
+# never matched and the step silently skipped on every amd64 build, leaving
+# images without the launcher (sandbox "no backend usable" error). Map the
+# arch explicitly and FAIL THE BUILD if the binary cannot be provided.
+RUN set -eux; \
+    if [ -n "${DSH_SOURCE_REF}" ]; then \
+      case "${TARGETARCH}" in \
+        amd64) P="linux-x64" ;; \
+        arm64) P="linux-arm64" ;; \
+        *) echo "ERROR: no landlock platform package for TARGETARCH=${TARGETARCH}"; exit 1 ;; \
+      esac; \
+      D="/opt/dsh-src/native/landlock-run/packages/$P"; \
+      if [ ! -x "$D/bin/landlock-run" ]; then \
         V=$(node -p "require('$D/package.json').version" 2>/dev/null || echo latest); \
-        cd /tmp && { \
-          T=$(npm pack --silent "@deepseek-ai/node-addon-landlock-run-$P@${V}" | tail -n1) \
-          && tar xzf "$T" package/bin/landlock-run \
-          && mkdir -p "$D/bin" \
-          && install -m 755 package/bin/landlock-run "$D/bin/landlock-run" \
-          && rm -rf /tmp/package "/tmp/$T" \
-          && echo "landlock launcher installed ($P ${V})"; \
-        } || echo "WARNING: landlock launcher install failed - sandbox modes unavailable at runtime"; \
+        cd /tmp; \
+        T=$(npm pack --silent "@deepseek-ai/node-addon-landlock-run-$P@${V}" | tail -n1); \
+        tar xzf "$T" package/bin/landlock-run; \
+        mkdir -p "$D/bin"; \
+        install -m 755 package/bin/landlock-run "$D/bin/landlock-run"; \
+        rm -rf /tmp/package "/tmp/$T"; \
+        "$D/bin/landlock-run" --probe; \
+        echo "landlock launcher installed ($P ${V})"; \
+      else \
+        "$D/bin/landlock-run" --probe; \
+        echo "landlock launcher already present ($P)"; \
       fi; \
     fi
 
