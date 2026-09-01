@@ -42,6 +42,13 @@ services:
       # Docker engine access — either TCP proxy…
       DOCKER_HOST: "${DOCKER_HOST:-}"
       # …or mount /var/run/docker.sock via the compose.docker.yaml override
+      # FIX 2026-09-01: proxy "unlock remote settings" JS rewrite regex only
+      # matched the LAST dotted segment; on newer upstream code it corrupted
+      # the served bundle (ctx.remote.$host.isLoopback ? ... -> ctx.remote."host"
+      # = SyntaxError). Patched proxy + settings shim are bind-mounted below.
+      # PROXY_UNLOCK_REMOTE_SETTINGS=1 keeps the (now-safe) rewrite feature on;
+      # set to 0 to disable the feature entirely (stock behaviour).
+      PROXY_UNLOCK_REMOTE_SETTINGS: "${PROXY_UNLOCK_REMOTE_SETTINGS:-1}"
       # upstream runtime knobs (safe defaults; see README)
       DSH_TELEMETRY_DISABLED: "${DSH_TELEMETRY_DISABLED:-1}"
       DSH_PERMISSION_MODE: "${DSH_PERMISSION_MODE:-}"
@@ -54,6 +61,13 @@ services:
       - dsh-home:/home/node/.dsh
       # Agent workspace (the Web UI dir-selector treats /workspace as HOME)
       - ${DSH_WORKSPACE:-./workspace}:/workspace
+      # FIX 2026-09-01: patched reverse proxy (full dotted-chain regex fix)
+      # overrides the read-only image copy at /opt/seek-harness/proxy.mjs
+      - ./overrides/proxy.mjs:/opt/seek-harness/proxy.mjs:ro
+      # FIX 2026-09-01: re-export settingsNamespace (made internal upstream in
+      # 0.1.2-alpha.3) so ecosystem plugins that still import it keep loading.
+      # Remove once the plugins ship alpha3-compatible releases.
+      - ./overrides/settings-index.js:/opt/dsh-src/packages/settings/settings/lib/index.js:ro
     # Writable temp space. NOT for a browser (there is none) — this exists
     # because of `read_only: true` below: Node, npm/pnpm caches, python,
     # uv/uvx temp venvs (MCP servers) and gcc all need /tmp, and `exec`

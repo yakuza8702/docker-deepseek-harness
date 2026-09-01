@@ -169,3 +169,18 @@ docker compose up -d && curl -fsS http://127.0.0.1:3080/ && docker compose ps   
 - [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) — the official project (MIT)
 - [runzhliu/deepseek-harness-docker](https://github.com/runzhliu/deepseek-harness-docker) — hardening patterns
 - [smanx/deepseek-harness](https://hub.docker.com/r/smanx/deepseek-harness) — devtools package set + reverse-proxy "0.0.0.0 fix"
+
+## Overrides directory (`overrides/`)
+
+The `overrides/` folder holds bind-mounted patches that fix or extend the
+upstream image without rebuilding it. These survive image updates.
+
+| File | Mount target | Fix |
+|---|---|---|
+| `overrides/proxy.mjs` | `/opt/seek-harness/proxy.mjs:ro` | Full-chain regex for the "unlock remote settings" JS rewrite (narrow regex left dangling `ctx.remote.` prefix → SyntaxError) |
+| `overrides/settings-index.js` | `/opt/dsh-src/packages/settings/settings/lib/index.js:ro` | Re-exports `settingsNamespace` (made internal in 0.1.2-alpha.3) so third-party plugins that still import it keep loading |
+
+To remove: delete the file, remove the `- ./overrides/...` line from compose.yaml,
+and (for settings-index.js) re-enable the `disabled: true` rows in
+`dsh-home/profiles/web/cordis.patch.yml` if the upstream plugins have been
+updated.
